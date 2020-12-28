@@ -55,7 +55,7 @@ mod libindy;
 #[cfg(test)]
 mod tests {
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
     use rand::Rng;
     use serde_json::Value;
@@ -151,6 +151,21 @@ mod tests {
         ])
     }
 
+
+    fn requested_attribute_state(did: &str, schema_id: &str, cred_def_id: &str) -> Value {
+        let (_address1, _address2, _city, state, _zip) = attr_names();
+        json!([
+           {
+              "name":state,
+              "restrictions": [{
+                "issuer_did": did,
+                "schema_id": schema_id,
+                "cred_def_id": cred_def_id,
+               }]
+           },
+        ])
+    }
+
     fn create_and_send_cred_offer(did: &str, cred_def_handle: u32, connection: u32, credential_data: &str, comment: Option<&str>) -> u32 {
         set_institution(None);
         info!("create_and_send_cred_offer >> creating issuer credential");
@@ -214,8 +229,16 @@ mod tests {
         }
     }
 
-    fn send_proof_request(connection_handle: u32, requested_attrs: &str, requested_preds: &str, revocation_interval: &str, institution_handle: Option<u32>, request_name: Option<&str>) -> u32 {
+    fn send_proof_request(
+        connection_handle: u32,
+        requested_attrs: &str,
+        requested_preds: &str,
+        revocation_interval: &str,
+        institution_handle: Option<u32>,
+        request_name: Option<&str>
+    ) -> u32 {
         set_institution(institution_handle);
+        info!("send_proof_request >>> requested_attrs={}, requested_preds={}, revocation_interval={} request_name={:?}", requested_attrs, requested_preds, revocation_interval, request_name);
         let proof_req_handle = proof::create_proof("1".to_string(),
                                                    requested_attrs.to_string(),
                                                    requested_preds.to_string(),
@@ -323,10 +346,45 @@ mod tests {
         (schema_id, cred_def_id, rev_reg_id, cred_def_handle, credential_handle)
     }
 
-    fn _verifier_create_proof_and_send_request(institution_did: &str, schema_id: &str, cred_def_id: &str, alice: u32, institution_handle: Option<u32>, request_name: Option<&str>) -> u32 {
+    fn _verifier_create_proof_and_send_request(
+        institution_did: &str,
+        schema_id: &str,
+        cred_def_id: &str,
+        handle_connection_to_prover: u32,
+        institution_handle: Option<u32>,
+        request_name: Option<&str>,
+    ) -> u32 {
         let _requested_attrs = requested_attrs(&institution_did, &schema_id, &cred_def_id, None, None);
         let requested_attrs_string = serde_json::to_string(&_requested_attrs).unwrap();
-        send_proof_request(alice, &requested_attrs_string, "[]", "{}", institution_handle, request_name)
+        send_proof_request(
+            handle_connection_to_prover,
+            &requested_attrs_string,
+            "[]",
+            "{}",
+            institution_handle,
+            request_name
+        )
+    }
+
+    fn _verifier_request_state_proof_with_nonrevoc(
+        revocation_interval: &str,
+        institution_did: &str,
+        schema_id: &str,
+        cred_def_id: &str,
+        handle_connection_to_prover: u32,
+        institution_handle: Option<u32>,
+        request_name: Option<&str>,
+    ) -> u32 {
+        let _requested_attrs = requested_attribute_state(&institution_did, &schema_id, &cred_def_id);
+        let requested_attrs_string = serde_json::to_string(&_requested_attrs).unwrap();
+        send_proof_request(
+            handle_connection_to_prover,
+            &requested_attrs_string,
+            "[]",
+            revocation_interval,
+            institution_handle,
+            request_name
+        )
     }
 
     fn _prover_select_credentials_and_send_proof(faber: u32, consumer_handle: Option<u32>, request_name: Option<&str>, requested_values: Option<&str>) {
@@ -787,6 +845,50 @@ mod tests {
         set_institution(Some(verifier));
         proof::update_state(proof_handle_verifier, None, None).unwrap();
         assert_eq!(proof::get_proof_state(proof_handle_verifier).unwrap(), ProofStateType::ProofValidated as u32);
+    }
+
+
+    #[test]
+    #[cfg(feature = "agency_pool_tests")]
+    fn test_revocation_intervals() {
+        let _setup = SetupLibraryAgencyV2ZeroFees::init();
+        let institution_did = settings::get_config_value(settings::CONFIG_INSTITUTION_DID).unwrap(); // Issuer's did
+
+        let verifier = create_institution_config();
+        let consumer = create_consumer_config();
+        let (consumer_to_verifier, verifier_to_consumer) = connection::tests::create_connected_connections(Some(consumer), Some(verifier));
+        let (consumer_to_issuer, issuer_to_consumer) = connection::tests::create_connected_connections(Some(consumer), None);
+
+        let (schema_id, _schema_json, cred_def_id, _cred_def_json, cred_def_handle, rev_reg_id) = _create_address_schema();
+        let (address1, address2, city, state, zip) = attr_names();
+        let (req1, req2) = (Some("request1"), Some("request2"));
+        let credential_data1 = json!({address1.clone(): "123 Main St", address2.clone(): "Suite 3", city.clone(): "Draper", state.clone(): "UT", zip.clone(): "84000"}).to_string();
+        let credential_handle1 = _exchange_credential(credential_data1.clone(), cred_def_handle, consumer_to_issuer, issuer_to_consumer, Some(consumer), req1);
+
+        thread::sleep(Duration::from_secs(2));
+        let utimeAfterIssuance = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+        thread::sleep(Duration::from_secs(2));
+        revoke_credential(credential_handle1, rev_reg_id);
+        let utimeAfterRevocation = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+        thread::sleep(Duration::from_secs(5));
+        {
+            let proof_handle_verifier = _verifier_request_state_proof_with_nonrevoc(
+                &json!({"from": 0, "to": utimeAfterIssuance}).to_string(),
+                &institution_did, &schema_id, &cred_def_id, verifier_to_consumer, Some(verifier), req1);
+            _prover_select_credentials_and_send_proof(consumer_to_verifier, Some(consumer), req1, None);
+            set_institution(Some(verifier));
+            proof::update_state(proof_handle_verifier, None, None).unwrap();
+            assert_eq!(proof::get_proof_state(proof_handle_verifier).unwrap(), ProofStateType::ProofValidated as u32);
+        }
+        {
+            let proof_handle_verifier = _verifier_request_state_proof_with_nonrevoc(
+                &json!({"from": 0, "to": utimeAfterRevocation}).to_string(),
+                &institution_did, &schema_id, &cred_def_id, verifier_to_consumer, Some(verifier), req2);
+            _prover_select_credentials_and_send_proof(consumer_to_verifier, Some(consumer), req2, None);
+            set_institution(Some(verifier));
+            proof::update_state(proof_handle_verifier, None, None).unwrap();
+            assert_eq!(proof::get_proof_state(proof_handle_verifier).unwrap(), ProofStateType::ProofInvalid as u32);
+        }
     }
 
     #[test]
