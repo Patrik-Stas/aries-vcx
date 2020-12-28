@@ -219,6 +219,56 @@ pub fn build_rev_states_json_using_cache(credentials_identifiers: &mut Vec<CredI
     Ok(rtn.to_string())
 }
 
+pub fn build_rev_states_json_nocache(credentials_identifiers: &mut Vec<CredInfoProver>) -> VcxResult<String> {
+    trace!("build_rev_states_json >> credentials_identifiers: {:?}", credentials_identifiers);
+    let mut rtn: Value = json!({});
+    let mut timestamps: HashMap<String, u64> = HashMap::new();
+
+    for cred_info in credentials_identifiers.iter_mut() {
+        if let (Some(rev_reg_id), Some(cred_rev_id), Some(tails_file)) =
+        (&cred_info.rev_reg_id, &cred_info.cred_rev_id, &cred_info.tails_file) {
+            if rtn.get(&rev_reg_id).is_none() { // Does this make sense in case cred_info's for same rev_reg_ids have different revocation intervals
+                let (from, to) = if let Some(ref interval) = cred_info.revocation_interval
+                { (interval.from, interval.to) } else { (None, None) };
+
+                let (_, rev_reg_def_json) = get_rev_reg_def_json(&rev_reg_id)?;
+
+                let (rev_reg_id, rev_reg_delta_json, timestamp) = get_rev_reg_delta_json(
+                    &rev_reg_id,
+                    from,
+                    to,
+                )?;
+
+                let rev_state_json = anoncreds::libindy_prover_create_revocation_state(
+                    &rev_reg_def_json,
+                    &rev_reg_delta_json,
+                    &cred_rev_id,
+                    &tails_file,
+                )?;
+
+                let rev_state_json: Value = serde_json::from_str(&rev_state_json)
+                    .map_err(|err| VcxError::from_msg(VcxErrorKind::InvalidJson, format!("Cannot deserialize RevocationState: {}", err)))?;
+
+                // TODO: proover should be able to create multiple states of same revocation policy for different timestamps
+                // see ticket IS-1108
+                rtn[rev_reg_id.to_string()] = json!({timestamp.to_string(): rev_state_json});
+                cred_info.timestamp = Some(timestamp);
+
+                // Cache timestamp for future attributes that have the same rev_reg_id
+                timestamps.insert(rev_reg_id.to_string(), timestamp);
+            }
+
+            // If the rev_reg_id is already in the map, timestamp may not be updated on cred_info
+            // All further credential info gets the same timestamp as the first one
+            if cred_info.timestamp.is_none() {
+                cred_info.timestamp = timestamps.get(rev_reg_id).cloned();
+            }
+        }
+    }
+
+    Ok(rtn.to_string())
+}
+
 pub fn build_requested_credentials_json(credentials_identifiers: &Vec<CredInfoProver>,
                                         self_attested_attrs: &str,
                                         proof_req: &ProofRequestData) -> VcxResult<String> {
