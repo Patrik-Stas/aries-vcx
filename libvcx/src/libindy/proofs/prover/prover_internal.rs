@@ -114,7 +114,7 @@ fn _get_revocation_interval(attr_name: &str, proof_req: &ProofRequestData) -> Vc
     }
 }
 
-pub fn build_rev_states_json(credentials_identifiers: &mut Vec<CredInfoProver>) -> VcxResult<String> {
+pub fn build_rev_states_json_using_cache(credentials_identifiers: &mut Vec<CredInfoProver>) -> VcxResult<String> {
     trace!("build_rev_states_json >> credentials_identifiers: {:?}", credentials_identifiers);
     let mut rtn: Value = json!({});
     let mut timestamps: HashMap<String, u64> = HashMap::new();
@@ -659,7 +659,7 @@ pub mod tests {
             timestamp: None,
         };
         let mut cred_info = vec![cred1];
-        let states = build_rev_states_json(cred_info.as_mut()).unwrap();
+        let states = build_rev_states_json_using_cache(cred_info.as_mut()).unwrap();
         let rev_state_json: Value = serde_json::from_str(REV_STATE_JSON).unwrap();
         let expected = json!({REV_REG_ID: {"1": rev_state_json}}).to_string();
         assert_eq!(states, expected);
@@ -672,7 +672,7 @@ pub mod tests {
         let _setup = SetupLibraryWalletPoolZeroFees::init();
 
         // empty vector
-        assert_eq!(build_rev_states_json(Vec::new().as_mut()).unwrap(), "{}".to_string());
+        assert_eq!(build_rev_states_json_using_cache(Vec::new().as_mut()).unwrap(), "{}".to_string());
 
         // no rev_reg_id
         let cred1 = CredInfoProver {
@@ -686,7 +686,7 @@ pub mod tests {
             revocation_interval: None,
             timestamp: None,
         };
-        assert_eq!(build_rev_states_json(vec![cred1].as_mut()).unwrap(), "{}".to_string());
+        assert_eq!(build_rev_states_json_using_cache(vec![cred1].as_mut()).unwrap(), "{}".to_string());
     }
 
     #[cfg(feature = "pool_tests")]
@@ -715,7 +715,7 @@ pub mod tests {
         let cache = get_rev_reg_cache(&rev_reg_id, &rev_id);
         assert_eq!(cache.rev_state, None);
 
-        let states = build_rev_states_json(vec![cred2].as_mut()).unwrap();
+        let states = build_rev_states_json_using_cache(vec![cred2].as_mut()).unwrap();
         assert!(states.contains(&rev_reg_id));
 
         // check if this value is in cache now.
@@ -766,7 +766,7 @@ pub mod tests {
         let cache = get_rev_reg_cache(&rev_reg_id, &rev_id);
         assert_eq!(cache, cached_data);
 
-        let states = build_rev_states_json(vec![cred2].as_mut()).unwrap();
+        let states = build_rev_states_json_using_cache(vec![cred2].as_mut()).unwrap();
         assert!(states.contains(&rev_reg_id));
 
         let cache = get_rev_reg_cache(&rev_reg_id, &rev_id);
@@ -821,7 +821,7 @@ pub mod tests {
         let cache = get_rev_reg_cache(&rev_reg_id, &rev_id);
         assert_eq!(cache, cached_data);
 
-        let states = build_rev_states_json(vec![cred2].as_mut()).unwrap();
+        let states = build_rev_states_json_using_cache(vec![cred2].as_mut()).unwrap();
         assert!(states.contains(&rev_reg_id));
 
         // assert cached data is updated.
@@ -876,7 +876,7 @@ pub mod tests {
         let cache = get_rev_reg_cache(&rev_reg_id, &rev_id);
         assert_eq!(cache, cached_data);
 
-        let states = build_rev_states_json(vec![cred2].as_mut()).unwrap();
+        let states = build_rev_states_json_using_cache(vec![cred2].as_mut()).unwrap();
         assert!(states.contains(&rev_reg_id));
 
         // assert cached data is unchanged.

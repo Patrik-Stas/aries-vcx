@@ -1,6 +1,6 @@
 use crate::error::prelude::*;
 use crate::libindy::proofs::proof_request::ProofRequestData;
-use crate::libindy::proofs::prover::prover_internal::{build_cred_defs_json_prover, build_requested_credentials_json, build_rev_states_json, build_schemas_json_prover, credential_def_identifiers};
+use crate::libindy::proofs::prover::prover_internal::{build_cred_defs_json_prover, build_requested_credentials_json, build_rev_states_json_using_cache, build_schemas_json_prover, credential_def_identifiers};
 use crate::libindy::utils::anoncreds;
 use crate::settings;
 use crate::utils::mockdata::mock_settings::get_mock_generate_indy_proof;
@@ -21,7 +21,7 @@ pub fn generate_indy_proof(credentials: &str, self_attested_attrs: &str, proof_r
 
     let mut credentials_identifiers = credential_def_identifiers(credentials, &proof_request)?;
 
-    let revoc_states_json = build_rev_states_json(&mut credentials_identifiers)?;
+    let revoc_states_json = build_rev_states_json_using_cache(&mut credentials_identifiers)?;
     let requested_credentials = build_requested_credentials_json(&credentials_identifiers,
                                                                  self_attested_attrs,
                                                                  &proof_request)?;
